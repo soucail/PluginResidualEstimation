@@ -1,1 +1,2 @@
----
+residual_gain: 200
+reference_frame: "tool_frame"

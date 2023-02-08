@@ -6,10 +6,14 @@
 
 #include <mc_control/GlobalPlugin.h>
 
+#include <RBDyn/Coriolis.h>
+#include <RBDyn/MultiBody.h>
+#include <RBDyn/MultiBodyConfig.h>
+
 namespace mc_plugin
 {
 
-struct NewPlugin : public mc_control::GlobalPlugin
+struct ExternalForcesEstimator : public mc_control::GlobalPlugin
 {
   void init(mc_control::MCGlobalController & controller, const mc_rtc::Configuration & config) override;
 
@@ -21,9 +25,28 @@ struct NewPlugin : public mc_control::GlobalPlugin
 
   mc_control::GlobalPlugin::GlobalPluginConfiguration configuration() override;
 
-  ~NewPlugin() override;
+  ~ExternalForcesEstimator() override;
+
+  void addGui(mc_control::MCGlobalController & controller);
+  void addLog(mc_control::MCGlobalController & controller);
+  void removeLog(mc_control::MCGlobalController & controller);
 
 private:
+  int jointNumber;
+  int counter;
+
+  Eigen::MatrixXd residualGains;
+  std::string referenceFrame;
+
+  rbd::Jacobian jac;
+  rbd::Coriolis * coriolis;
+  rbd::ForwardDynamics forwardDynamics;
+
+  Eigen::VectorXd pzero;
+
+  Eigen::VectorXd integralTerm;
+  Eigen::VectorXd residual;
+  sva::ForceVecd externalForces;
 };
 
 } // namespace mc_plugin
