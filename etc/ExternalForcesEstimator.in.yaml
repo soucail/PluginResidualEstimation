@@ -1,2 +1,4 @@
-residual_gain: 200
-reference_frame: "tool_frame"
+residual_gain: 10
+reference_frame: tool_frame
+use_force_sensor: false
+ros_force_sensor: false

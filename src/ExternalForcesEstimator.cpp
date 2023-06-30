@@ -193,12 +193,13 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
   if (isActive)
   {
     extTorqueSensor->torques(externalTorques);
+    counter = 0;
   }
   else
   {
     Eigen::VectorXd zero = Eigen::VectorXd::Zero(jointNumber);
     extTorqueSensor->torques(zero);
-    if (counter%10000 == 0) mc_rtc::log::warning("External force feedback inactive");
+    if (counter == 1) mc_rtc::log::warning("External force feedback inactive");
   }
 
   // mc_rtc::log::info("ExternalForcesEstimator::before");
