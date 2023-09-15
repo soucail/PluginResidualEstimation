@@ -65,6 +65,8 @@ private:
   Eigen::VectorXd filteredExternalTorques;
   sva::ForceVecd externalForces;
   sva::ForceVecd externalForcesResidual;
+  sva::ForceVecd newExternalForces;
+  sva::ForceVecd filteredFTSensorForces;
   Eigen::Vector6d externalForcesFT;
   mc_rbdyn::ExternalTorqueSensor * extTorqueSensor;
   mc_rbdyn::VirtualTorqueSensor * virtTorqueSensor;

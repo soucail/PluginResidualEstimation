@@ -19,30 +19,35 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
 
   jointNumber = ctl.robot(ctl.robots()[0].name()).refJointOrder().size();
 
-  if (!robot.hasDevice<mc_rbdyn::ExternalTorqueSensor>("externalTorqueSensor"))
+  if(!robot.hasDevice<mc_rbdyn::ExternalTorqueSensor>("externalTorqueSensor"))
   {
-    mc_rtc::log::error_and_throw<std::runtime_error>("[ExternalForcesEstimator][Init] No \"ExternalTorqueSensor\" with the name \"externalTorqueSensor\" found in the robot module, please add one to the robot's RobotModule.");
+    mc_rtc::log::error_and_throw<std::runtime_error>(
+        "[ExternalForcesEstimator][Init] No \"ExternalTorqueSensor\" with the name \"externalTorqueSensor\" found in "
+        "the robot module, please add one to the robot's RobotModule.");
   }
   extTorqueSensor = &robot.device<mc_rbdyn::ExternalTorqueSensor>("externalTorqueSensor");
 
-  if (!robot.hasDevice<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor"))
+  if(!robot.hasDevice<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor"))
   {
-    mc_rtc::log::error_and_throw<std::runtime_error>("[ExternalForcesEstimator][Init] No \"VirtualTorqueSensor\" with the name \"virtualTorqueSensor\" found in the robot module, please add one to the robot's RobotModule.");
+    mc_rtc::log::error_and_throw<std::runtime_error>(
+        "[ExternalForcesEstimator][Init] No \"VirtualTorqueSensor\" with the name \"virtualTorqueSensor\" found in the "
+        "robot module, please add one to the robot's RobotModule.");
   }
   virtTorqueSensor = &robot.device<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor");
 
   Eigen::VectorXd qdot(jointNumber);
-  for (size_t i = 0; i < jointNumber; i++)
+  for(size_t i = 0; i < jointNumber; i++)
   {
     qdot[i] = robot.alpha()[robot.jointIndexByName(rjo[i])][0];
   }
 
   // load config
   residualGains = config("residual_gain", 0.0);
-  referenceFrame = config("reference_frame",(std::string)"");
+  referenceFrame = config("reference_frame", (std::string) "");
   verbose = config("verbose", false);
   use_force_sensor_ = config("use_force_sensor", false);
   ros_force_sensor_ = config("ros_force_sensor", false);
+  force_sensor_topic_ = config("ros_topic_sensor", (std::string) "");
   // config loaded
 
   if(ros_force_sensor_)
@@ -57,20 +62,19 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
     wrench_sub_.maxTime(maxTime_);
   }
 
-  jac = rbd::Jacobian(robot.mb(),referenceFrame);
+  jac = rbd::Jacobian(robot.mb(), referenceFrame);
   coriolis = new rbd::Coriolis(robot.mb());
   forwardDynamics = rbd::ForwardDynamics(robot.mb());
 
-  
-
-  forwardDynamics.computeH(robot.mb(),robot.mbc());
+  forwardDynamics.computeH(robot.mb(), robot.mbc());
   auto inertiaMatrix = forwardDynamics.H();
-  pzero = inertiaMatrix*qdot;
+  pzero = inertiaMatrix * qdot;
 
   integralTerm = Eigen::VectorXd::Zero(jointNumber);
   residual = Eigen::VectorXd::Zero(jointNumber);
   FTSensorTorques = Eigen::VectorXd::Zero(jointNumber);
   filteredFTSensorTorques = Eigen::VectorXd::Zero(jointNumber);
+  newExternalTorques = Eigen::VectorXd::Zero(jointNumber);
   filteredExternalTorques = Eigen::VectorXd::Zero(jointNumber);
   externalForces = sva::ForceVecd::Zero();
   externalForcesResidual = sva::ForceVecd::Zero();
@@ -81,17 +85,20 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   ctl.controller().datastore().make_call("EF_Estimator::isActive", [this]() { return this->isActive; });
   ctl.controller().datastore().make_call("EF_Estimator::toggleActive", [this]() { this->isActive = !this->isActive; });
   ctl.controller().datastore().make_call("EF_Estimator::useForceSensor", [this]() { return this->use_force_sensor_; });
-  ctl.controller().datastore().make_call("EF_Estimator::toggleForceSensor", [this]() { this->use_force_sensor_ = !this->use_force_sensor_; });
-  ctl.controller().datastore().make_call("EF_Estimator::setGain", [this](double gain) {
-    this->integralTerm.setZero();
-    this->residual.setZero();
-    this->filteredFTSensorTorques.setZero();
-    this->residualGains = gain;
-  });
+  ctl.controller().datastore().make_call("EF_Estimator::toggleForceSensor",
+                                         [this]() { this->use_force_sensor_ = !this->use_force_sensor_; });
+  ctl.controller().datastore().make_call("EF_Estimator::setGain",
+                                         [this](double gain)
+                                         {
+                                           this->integralTerm.setZero();
+                                           this->residual.setZero();
+                                           this->filteredFTSensorTorques.setZero();
+                                           this->residualGains = gain;
+                                         });
 
   addGui(controller);
   addLog(controller);
-  
+
   mc_rtc::log::info("[ExternalForcesEstimator][Init] called with configuration:\n{}", config.dump(true, true));
 }
 
@@ -104,8 +111,8 @@ void ExternalForcesEstimator::reset(mc_control::MCGlobalController & controller)
 void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller)
 {
   auto & ctl = static_cast<mc_control::MCGlobalController &>(controller);
-  
-  if (ctl.robot().encoderVelocities().empty())
+
+  if(ctl.robot().encoderVelocities().empty())
   {
     return;
   }
@@ -120,7 +127,7 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
   auto & rjo = realRobot.refJointOrder();
 
   Eigen::VectorXd qdot(jointNumber), tau(jointNumber);
-  for (size_t i = 0; i < jointNumber; i++)
+  for(size_t i = 0; i < jointNumber; i++)
   {
     qdot[i] = realRobot.alpha()[realRobot.jointIndexByName(rjo[i])][0];
     tau[i] = realRobot.jointTorques()[i];
@@ -128,15 +135,17 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
 
   auto R = controller.robot().bodyPosW(referenceFrame).rotation();
 
-  forwardDynamics.computeC(realRobot.mb(),realRobot.mbc());
-  forwardDynamics.computeH(realRobot.mb(),realRobot.mbc());
-  auto coriolisMatrix = coriolis->coriolis(realRobot.mb(),realRobot.mbc());
+  forwardDynamics.computeC(realRobot.mb(), realRobot.mbc());
+  forwardDynamics.computeH(realRobot.mb(), realRobot.mbc());
+  auto coriolisMatrix = coriolis->coriolis(realRobot.mb(), realRobot.mbc());
   auto coriolisGravityTerm = forwardDynamics.C();
-  integralTerm += (tau + (coriolisMatrix + coriolisMatrix.transpose())*qdot - coriolisGravityTerm + virtTorqueSensor->torques() + residual)*ctl.timestep();
+  integralTerm += (tau + (coriolisMatrix + coriolisMatrix.transpose()) * qdot - coriolisGravityTerm
+                   + virtTorqueSensor->torques() + residual)
+                  * ctl.timestep();
   auto inertiaMatrix = forwardDynamics.H();
-  auto pt = inertiaMatrix*qdot;
+  auto pt = inertiaMatrix * qdot;
 
-  residual = residualGains*(pt - integralTerm + pzero);
+  residual = residualGains * (pt - integralTerm + pzero);
   auto jTranspose = jac.jacobian(realRobot.mb(), realRobot.mbc());
   jTranspose.transposeInPlace();
   Eigen::VectorXd FR = jTranspose.completeOrthogonalDecomposition().solve(residual);
@@ -145,52 +154,60 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
   externalForcesResidual.couple() = R * externalForcesResidual.couple();
   // mc_rtc::log::info("===== {}", jTranspose.completeOrthogonalDecomposition().pseudoInverse()*jTranspose);
 
-  if (use_force_sensor_)
+  if(ros_force_sensor_)
   {
-    if(ros_force_sensor_)
-    {
-      // if (counter%1000 == 0) mc_rtc::log::warning("FT sensor wrench value : {}", wrench_sub_.data().value());
-      auto wrench = wrench_sub_.data().value();
-      externalForcesFT = wrench.vector();
-      // wrench.moment().setZero();
-      ctl.setWrenches({{"EEForceSensor", wrench}});
-    }
-    
-    auto sva_EF_FT = realRobot.forceSensor("EEForceSensor").wrenchWithoutGravity(realRobot);
-    externalForcesFT = sva_EF_FT.vector();
-    // Applying some rotation so it match the same world as the residual
-    externalForces.force() = R.transpose()*sva_EF_FT.force();
-    externalForces.couple() = R.transpose()*sva_EF_FT.couple();
-    FTSensorTorques = jac.jacobian(realRobot.mb(), realRobot.mbc()).transpose()*(externalForces.vector());
-    double alpha = 1-exp(-dt*residualGains);
-    filteredFTSensorTorques += alpha*(FTSensorTorques -filteredFTSensorTorques);
-    alpha = 1-exp(-dt*(double)50.0);
-    filteredExternalTorques += alpha*(residual + (FTSensorTorques - filteredFTSensorTorques) - filteredExternalTorques);
-    externalTorques = filteredExternalTorques;
-    externalForces = sva::ForceVecd(jac.jacobian(realRobot.mb(), realRobot.mbc()).transpose().completeOrthogonalDecomposition().solve(externalTorques));
-    externalForces.force() = R * externalForces.force();
-    externalForces.couple() = R * externalForces.couple();
+    // if (counter%1000 == 0) mc_rtc::log::warning("FT sensor wrench value : {}", wrench_sub_.data().value());
+    auto wrench = wrench_sub_.data().value();
+    externalForcesFT = wrench.vector();
+    // wrench.moment().setZero();
+    ctl.setWrenches({{"EEForceSensor", wrench}});
+  }
 
-    // if (counter%1000 == 0)
-    // {
-    //   mc_rtc::log::info("FT sensor joint torque : {}", FTSensorTorques.transpose());
-    //   mc_rtc::log::info("Filtered FT sensor     : {}", filteredFTSensorTorques.transpose());
-    //   mc_rtc::log::info("Diff FT & FT filtered  : {}", (FTSensorTorques-filteredFTSensorTorques).transpose());
-    //   mc_rtc::log::info("ExternalTorques        : {}", externalTorques.transpose());
-    //   mc_rtc::log::info("ExternalForces         : {}", externalForces);
-    //   mc_rtc::log::info("alpha                  : {}", alpha);
-    // }
+  auto sva_EF_FT = realRobot.forceSensor("EEForceSensor").wrenchWithoutGravity(realRobot);
+  externalForcesFT = sva_EF_FT.vector();
+  // Applying some rotation so it match the same world as the residual
+  externalForces.force() = R.transpose() * sva_EF_FT.force();
+  externalForces.couple() = R.transpose() * sva_EF_FT.couple();
+  FTSensorTorques = jac.jacobian(realRobot.mb(), realRobot.mbc()).transpose() * (externalForces.vector());
+  double alpha = 1 - exp(-dt * residualGains);
+  filteredFTSensorTorques += alpha * (FTSensorTorques - filteredFTSensorTorques);
+  alpha = 1 - exp(-dt * (double)50.0);
+  newExternalTorques = residual + (FTSensorTorques - filteredFTSensorTorques);
+  filteredExternalTorques += alpha * (newExternalTorques - filteredExternalTorques);
+
+  filteredFTSensorForces = sva::ForceVecd(jac.jacobian(realRobot.mb(), realRobot.mbc())
+                                              .transpose()
+                                              .completeOrthogonalDecomposition()
+                                              .solve(filteredFTSensorTorques));
+  filteredFTSensorForces.force() = R * filteredFTSensorForces.force();
+  filteredFTSensorForces.couple() = R * filteredFTSensorForces.couple();
+
+  newExternalForces = sva::ForceVecd(jac.jacobian(realRobot.mb(), realRobot.mbc())
+                                         .transpose()
+                                         .completeOrthogonalDecomposition()
+                                         .solve(newExternalTorques));
+  newExternalForces.force() = R * newExternalForces.force();
+  newExternalForces.couple() = R * newExternalForces.couple();
+
+  if(use_force_sensor_)
+  {
+    externalTorques = filteredExternalTorques;
   }
   else
   {
     externalTorques = residual;
-    auto pinvJtranspose = jac.jacobian(realRobot.mb(),realRobot.mbc()).transpose().completeOrthogonalDecomposition().pseudoInverse();
-    externalForces = sva::ForceVecd(pinvJtranspose*externalTorques);
-  } 
+  }
+
+  externalForces = sva::ForceVecd(jac.jacobian(realRobot.mb(), realRobot.mbc())
+                                      .transpose()
+                                      .completeOrthogonalDecomposition()
+                                      .solve(externalTorques));
+  externalForces.force() = R * externalForces.force();
+  externalForces.couple() = R * externalForces.couple();
 
   counter++;
 
-  if (isActive)
+  if(isActive)
   {
     extTorqueSensor->torques(externalTorques);
     counter = 0;
@@ -199,7 +216,7 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
   {
     Eigen::VectorXd zero = Eigen::VectorXd::Zero(jointNumber);
     extTorqueSensor->torques(zero);
-    if (counter == 1) mc_rtc::log::warning("External force feedback inactive");
+    if(counter == 1) mc_rtc::log::warning("External force feedback inactive");
   }
 
   // mc_rtc::log::info("ExternalForcesEstimator::before");
@@ -234,83 +251,95 @@ void ExternalForcesEstimator::rosSpinner(void)
 void ExternalForcesEstimator::addGui(mc_control::MCGlobalController & controller)
 {
   auto & ctl = static_cast<mc_control::MCGlobalController &>(controller);
-  
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Checkbox("Is estimation feedback active", isActive)
-  );
-  
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Checkbox("Use force sensor", use_force_sensor_)
-  );
-  
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Checkbox("Use force sensor over ROS", ros_force_sensor_)
-  );
-  
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::NumberInput("Gain",
-      [this]() { return this->residualGains; },
-      [this](double gain) {
-        integralTerm.setZero();
-        residual.setZero();
-        residualGains = gain;
-      }
-    )
-  );
+
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::Checkbox("Is estimation feedback active", isActive));
+
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::Checkbox("Use force sensor", use_force_sensor_));
+
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::Checkbox("Use force sensor over ROS", ros_force_sensor_));
+
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::NumberInput(
+                                         "Gain", [this]() { return this->residualGains; },
+                                         [this](double gain)
+                                         {
+                                           if(gain != residualGains)
+                                           {
+                                             integralTerm.setZero();
+                                             residual.setZero();
+                                           }
+                                           residualGains = gain;
+                                         }));
 
   auto fConf = mc_rtc::gui::ForceConfig();
   // fConf.color = mc_rtc::gui::Color::Blue;
   fConf.force_scale = 0.01;
 
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Force(
-      "EndEffector", fConf, [this]() { return this->externalForces; },
-      [this, &controller]() {
-        auto transform = controller.robot().bodyPosW(referenceFrame);
-        return transform;
-      }
-    )
-  );
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::Force(
+                                         "EndEffector", fConf, [this]() { return this->externalForces; },
+                                         [this, &controller]()
+                                         {
+                                           auto transform = controller.robot().bodyPosW(referenceFrame);
+                                           return transform;
+                                         }));
 
   fConf.color = mc_rtc::gui::Color::Yellow;
 
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Force(
-      "EndEffector Residual", fConf, [this]() { return this->externalForcesResidual; },
-      [this, &controller]() {
-        auto transform = controller.robot().bodyPosW(referenceFrame);
-        return transform;
-      }
-    )
-  );
+  ctl.controller().gui()->addElement({"Plugins", "External forces estimator"},
+                                     mc_rtc::gui::Force(
+                                         "EndEffector Residual", fConf,
+                                         [this]() { return this->externalForcesResidual; },
+                                         [this, &controller]()
+                                         {
+                                           auto transform = controller.robot().bodyPosW(referenceFrame);
+                                           return transform;
+                                         }));
 
   fConf.color = mc_rtc::gui::Color::Red;
 
-  ctl.controller().gui()->addElement({"Plugins","External forces estimator"},
-    mc_rtc::gui::Force(
-      "EndEffector F/T sensor", fConf,
-      [this]() {
-        return sva::ForceVecd(this->externalForcesFT.segment(0,3), this->externalForcesFT.segment(3,3));
-      },
-      [this, &controller]() {
-        auto transform = controller.robot().bodyPosW(referenceFrame);
-        return transform;
-      }
-    )
-  );
+  ctl.controller().gui()->addElement(
+      {"Plugins", "External forces estimator"},
+      mc_rtc::gui::Force(
+          "EndEffector F/T sensor", fConf,
+          [this]()
+          { return sva::ForceVecd(this->externalForcesFT.segment(0, 3), this->externalForcesFT.segment(3, 3)); },
+          [this, &controller]()
+          {
+            auto transform = controller.robot().bodyPosW(referenceFrame);
+            return transform;
+          }));
 }
 
 void ExternalForcesEstimator::addLog(mc_control::MCGlobalController & controller)
 {
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_gain", [&, this]() {return this->residualGains;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_wrench", [&, this]() {return this->externalForces;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_residual_joint_torque", [&, this]() {return this->residual;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_residual_wrench", [&, this]() {return this->externalForcesResidual;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_integralTerm", [&, this]() {return this->integralTerm;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_filtered", [&, this]() {return this->filteredFTSensorTorques;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_torque", [&, this]() {return this->FTSensorTorques;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_wrench", [&, this]() {return this->externalForcesFT;});
-  controller.controller().logger().addLogEntry("ExternalForceEstimator_torque_value", [&, this]() {return this->externalTorques;});
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_gain",
+                                               [&, this]() { return this->residualGains; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_wrench",
+                                               [&, this]() { return this->externalForces; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_non_filtered_wrench",
+                                               [&, this]() { return this->newExternalForces; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_residual_joint_torque",
+                                               [&, this]() { return this->residual; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_residual_wrench",
+                                               [&, this]() { return this->externalForcesResidual; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_integralTerm",
+                                               [&, this]() { return this->integralTerm; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_filtered_torque",
+                                               [&, this]() { return this->filteredFTSensorTorques; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_filtered_wrench",
+                                               [&, this]() { return this->filteredFTSensorForces; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_torque",
+                                               [&, this]() { return this->FTSensorTorques; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_FTSensor_wrench",
+                                               [&, this]() { return this->externalForcesFT; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_non_filtered_torque_value",
+                                               [&, this]() { return this->newExternalTorques; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_torque_value",
+                                               [&, this]() { return this->externalTorques; });
 }
 
 void ExternalForcesEstimator::removeLog(mc_control::MCGlobalController & controller)
