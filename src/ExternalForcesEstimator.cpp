@@ -84,7 +84,7 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   counter = 0;
 
   // Create datastore's entries to change modify parameters from code
-  ctl.controller().datastore().make_call("EF_Estimator::isActive", [this]() { return this->isActive; });
+  ctl.controller().datastore().make_call("EF_Estimator::isActive", [this]() { this->isActive = true; });
   ctl.controller().datastore().make_call("EF_Estimator::toggleActive", [this]() { this->isActive = !this->isActive; });
   ctl.controller().datastore().make_call("EF_Estimator::useForceSensor", [this]() { return this->use_force_sensor_; });
   ctl.controller().datastore().make_call("EF_Estimator::toggleForceSensor",

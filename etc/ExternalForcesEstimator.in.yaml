@@ -1,5 +1,5 @@
 residual_gain: 10
-reference_frame: FT_frame
+reference_frame: FT_sensor_wrench
 use_force_sensor: true
 ros_force_sensor: false
 ros_topic_sensor: /fast_chatter
