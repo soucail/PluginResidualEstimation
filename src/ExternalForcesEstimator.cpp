@@ -201,6 +201,9 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
 
   counter++;
 
+  auto ctrl_mode = ctl.controller().datastore().get<std::string>("ControlMode");
+  if (ctrl_mode.compare("Torque") == 0) {ctl.controller().datastore().call("EF_Estimator::isActive");}
+
   if(isActive)
   {
     extTorqueSensor->torques(externalTorques);
