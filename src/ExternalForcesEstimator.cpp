@@ -9,6 +9,8 @@ ExternalForcesEstimator::~ExternalForcesEstimator() = default;
 
 void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, const mc_rtc::Configuration & config)
 {
+  mc_rtc::log::info("[ExternalForcesEstimator][Init] called with configuration:\n{}", config.dump(true, true));
+
   auto & ctl = static_cast<mc_control::MCGlobalController &>(controller);
 
   auto & robot = ctl.robot(ctl.robots()[0].name());
@@ -27,13 +29,13 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   }
   extTorqueSensor = &robot.device<mc_rbdyn::ExternalTorqueSensor>("externalTorqueSensor");
 
-  if(!robot.hasDevice<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor"))
-  {
-    mc_rtc::log::error_and_throw<std::runtime_error>(
-        "[ExternalForcesEstimator][Init] No \"VirtualTorqueSensor\" with the name \"virtualTorqueSensor\" found in the "
-        "robot module, please add one to the robot's RobotModule.");
-  }
-  virtTorqueSensor = &robot.device<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor");
+  // if(!robot.hasDevice<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor"))
+  // {
+  //   mc_rtc::log::error_and_throw<std::runtime_error>(
+  //       "[ExternalForcesEstimator][Init] No \"VirtualTorqueSensor\" with the name \"virtualTorqueSensor\" found in the "
+  //       "robot module, please add one to the robot's RobotModule.");
+  // }
+  // virtTorqueSensor = &robot.device<mc_rbdyn::VirtualTorqueSensor>("virtualTorqueSensor");
 
   Eigen::VectorXd qdot(jointNumber);
   for(size_t i = 0; i < jointNumber; i++)
@@ -98,8 +100,8 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
 
   addGui(controller);
   addLog(controller);
+  mc_rtc::log::success("[ExternalForcesEstimator][init] Initialization completed");
 
-  mc_rtc::log::info("[ExternalForcesEstimator][Init] called with configuration:\n{}", config.dump(true, true));
 }
 
 void ExternalForcesEstimator::reset(mc_control::MCGlobalController & controller)
@@ -117,13 +119,7 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
     return;
   }
 
-  // mc_rtc::log::info("[ExternalForceEstimator][ROS] Force: {} | Couple: {}",
-  //   wrench_sub_.data().value().force().transpose(),
-  //   wrench_sub_.data().value().couple().transpose()
-  // );
-
   auto & realRobot = ctl.realRobot(ctl.robots()[0].name());
-
   auto & rjo = realRobot.refJointOrder();
 
   Eigen::VectorXd qdot(jointNumber), tau(jointNumber);
@@ -139,9 +135,7 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
   forwardDynamics.computeH(realRobot.mb(), realRobot.mbc());
   auto coriolisMatrix = coriolis->coriolis(realRobot.mb(), realRobot.mbc());
   auto coriolisGravityTerm = forwardDynamics.C();
-  integralTerm += (tau + (coriolisMatrix + coriolisMatrix.transpose()) * qdot - coriolisGravityTerm
-                   + virtTorqueSensor->torques() + residual)
-                  * ctl.timestep();
+  integralTerm += (tau + (coriolisMatrix + coriolisMatrix.transpose()) * qdot - coriolisGravityTerm + residual) * ctl.timestep();
   auto inertiaMatrix = forwardDynamics.H();
   auto pt = inertiaMatrix * qdot;
 
