@@ -13,6 +13,8 @@
 
 #include <mc_rbdyn/ExternalTorqueSensor.h>
 #include <mc_rbdyn/VirtualTorqueSensor.h>
+#include <mc_rbdyn/Robot.h>
+
 
 #include "utils/ROSSubscriber.h"
 
@@ -47,6 +49,8 @@ private:
   bool isActive;
 
   double residualGains;
+  double power_;
+
   std::string referenceFrame;
 
   rbd::Jacobian jac;
@@ -70,6 +74,10 @@ private:
   Eigen::Vector6d externalForcesFT;
   mc_rbdyn::ExternalTorqueSensor * extTorqueSensor;
   mc_rbdyn::VirtualTorqueSensor * virtTorqueSensor;
+  Eigen::VectorXd motor_current_;
+  Eigen::VectorXd tau_current_;
+  Eigen::VectorXd alpha_;
+
 
   // Force sensor
   bool use_force_sensor_;

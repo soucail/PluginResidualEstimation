@@ -1,6 +1,12 @@
 #include "ExternalForcesEstimator.h"
 
 #include <mc_control/GlobalPluginMacros.h>
+#include <SpaceVecAlg/EigenTypedef.h>
+#include <Eigen/src/Core/Matrix.h>
+#include <RBDyn/MultiBodyConfig.h>
+#include <RBDyn/MultiBody.h>
+
+
 
 namespace mc_plugin
 {
@@ -16,6 +22,7 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   auto & robot = ctl.robot(ctl.robots()[0].name());
   auto & realRobot = ctl.realRobot(ctl.robots()[0].name());
   auto & rjo = robot.refJointOrder();
+
 
   dt = ctl.timestep();
 
@@ -51,6 +58,7 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   ros_force_sensor_ = config("ros_force_sensor", false);
   force_sensor_topic_ = config("ros_topic_sensor", (std::string) "");
   // config loaded
+  isActive = false;
 
   if(ros_force_sensor_)
   {
@@ -80,8 +88,11 @@ void ExternalForcesEstimator::init(mc_control::MCGlobalController & controller, 
   filteredExternalTorques = Eigen::VectorXd::Zero(jointNumber);
   externalForces = sva::ForceVecd::Zero();
   externalForcesResidual = sva::ForceVecd::Zero();
-
   counter = 0;
+  tau_current_ = Eigen::VectorXd::Zero(robot.mb().nrDof());
+  motor_current_ = Eigen::VectorXd::Zero(robot.mb().nrDof());
+  alpha_ = Eigen::VectorXd::Zero(robot.mb().nrDof());
+
 
   // Create datastore's entries to change modify parameters from code
   ctl.controller().datastore().make_call("EF_Estimator::isActive", [this]() { this->isActive = true; });
@@ -119,15 +130,16 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
     return;
   }
 
-  auto & realRobot = ctl.realRobot(ctl.robots()[0].name());
+  auto & realRobot = ctl.robot(ctl.robots()[0].name());
   auto & rjo = realRobot.refJointOrder();
 
   Eigen::VectorXd qdot(jointNumber), tau(jointNumber);
   for(size_t i = 0; i < jointNumber; i++)
   {
     qdot[i] = realRobot.alpha()[realRobot.jointIndexByName(rjo[i])][0];
-    tau[i] = realRobot.jointTorques()[i];
+    tau[i] = realRobot.jointTorque()[realRobot.jointIndexByName(rjo[i])][0];
   }
+  // std::cout << "Tau : = " << tau.transpose() << std::endl;
 
   auto R = controller.robot().bodyPosW(referenceFrame).rotation();
 
@@ -155,6 +167,17 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
     externalForcesFT = wrench.vector();
     // wrench.moment().setZero();
     ctl.setWrenches({{"EEForceSensor", wrench}});
+  }
+
+    // Calculation of the tau current motor
+  for (int i = 0; i < motor_current_.size(); ++i) { motor_current_(i)= controller.robot().jointSensors()[i].motorCurrent();} 
+  for (int i = 0; i < 4; ++i) { 
+    if (std::isnan(motor_current_(i))){tau_current_(i)= 0.0;}
+    else {tau_current_(i) = motor_current_(i)*100*0.11;}
+  }
+  for (int i = 4; i < 7; ++i) {
+    if (std::isnan(motor_current_(i))){tau_current_(i)= 0.0;}
+    else {tau_current_(i) = motor_current_(i)*100*0.076;}
   }
 
   auto sva_EF_FT = realRobot.forceSensor("EEForceSensor").wrenchWithoutGravity(realRobot);
@@ -198,11 +221,16 @@ void ExternalForcesEstimator::before(mc_control::MCGlobalController & controller
                                       .solve(externalTorques));
   externalForces.force() = R * externalForces.force();
   externalForces.couple() = R * externalForces.couple();
+  
+  rbd::paramToVector(controller.robot().alpha(),alpha_);
+
+
+  power_ = (tau_current_.transpose()).dot(alpha_);
 
   counter++;
 
   auto ctrl_mode = ctl.controller().datastore().get<std::string>("ControlMode");
-  if (ctrl_mode.compare("Torque") == 0) {ctl.controller().datastore().call("EF_Estimator::isActive");}
+  if (ctrl_mode.compare("Torque") == 0) {isActive = true;}
 
   if(isActive)
   {
@@ -337,6 +365,8 @@ void ExternalForcesEstimator::addLog(mc_control::MCGlobalController & controller
                                                [&, this]() { return this->newExternalTorques; });
   controller.controller().logger().addLogEntry("ExternalForceEstimator_torque_value",
                                                [&, this]() { return this->externalTorques; });
+  controller.controller().logger().addLogEntry("ExternalForceEstimator_power",
+                                               [&, this]() { return this->power_; });
 }
 
 void ExternalForcesEstimator::removeLog(mc_control::MCGlobalController & controller)
@@ -350,6 +380,9 @@ void ExternalForcesEstimator::removeLog(mc_control::MCGlobalController & control
   controller.controller().logger().removeLogEntry("ExternalForceEstimator_FTSensor_torque");
   controller.controller().logger().removeLogEntry("ExternalForceEstimator_FTSensor_wrench");
   controller.controller().logger().removeLogEntry("ExternalForceEstimator_torque_value");
+  controller.controller().logger().removeLogEntry("ExternalForceEstimator_FTSensor_wrench");
+  controller.controller().logger().removeLogEntry("ExternalForceEstimator_power");
+
 }
 
 } // namespace mc_plugin

@@ -1,5 +1,7 @@
-residual_gain: 10
+residual_gain: 30
 reference_frame: FT_sensor_wrench
-use_force_sensor: true
-ros_force_sensor: false
-ros_topic_sensor: /fast_chatter
+use_force_sensor: false
+ros_force_sensor: true
+#ros_topic_sensor: /fast_chatter
+ros_topic_sensor: /bus0/ft_sensor0/ft_sensor_readings/wrench
+
